@@ -2,12 +2,13 @@ import re
 import os
 import glob
 import json
+import base64
 from datetime import datetime, timedelta
 from collections import defaultdict
 
 # 파일 경로 및 보안 설정
 base_dir = r"d:\바탕화면\카톡내보내기"
-base_dir = r"d:\바탕화면\카톡내보내기"
+REPORT_PASSWORD = "gabom" # 접속용 비밀번호 지정
 
 # KakaoTalk으로 시작하는 .txt 파일들을 찾아서 가장 최근(수정시간 기준) 파일을 선택
 kakao_files = glob.glob(os.path.join(base_dir, "KakaoTalk*.txt"))
@@ -241,6 +242,17 @@ def analyze():
     }
     
     json_data_str = json.dumps(raw_data, ensure_ascii=False)
+    
+    # Python 기본 라이브러리를 이용한 암호화 (XOR + Base64)
+    def encrypt_data(data_str, pwd):
+        data_bytes = data_str.encode('utf-8')
+        pwd_bytes = pwd.encode('utf-8')
+        encrypted = bytearray()
+        for i in range(len(data_bytes)):
+            encrypted.append(data_bytes[i] ^ pwd_bytes[i % len(pwd_bytes)])
+        return base64.b64encode(encrypted).decode('utf-8')
+        
+    encrypted_data_str = encrypt_data(json_data_str, REPORT_PASSWORD)
 
     # HTML 생성
     html_content = f"""
@@ -275,7 +287,26 @@ def analyze():
             }}
             
             /* 메인 리포트 화면 스타일 */
-            #main-content {{ display: flex; flex-direction: column; flex: 1; padding: 20px; animation: fadeIn 0.8s ease; height: 100vh; min-height: 400px; overflow: hidden; }}
+            /* 로그인 화면 스타일 */
+            #login-screen {{
+                display: flex; flex-direction: column; align-items: center; justify-content: center;
+                height: 100vh; background: var(--primary-gradient); color: white;
+                position: absolute; top: 0; left: 0; width: 100%; z-index: 9999;
+            }}
+            .login-box {{
+                background: var(--card-bg); padding: 40px; border-radius: 20px;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.5); text-align: center; color: var(--text);
+                width: 320px;
+            }}
+            .login-box input {{
+                width: 100%; padding: 12px; margin: 20px 0; border: 1px solid var(--border);
+                border-radius: 10px; font-size: 16px; outline: none; text-align: center;
+            }}
+            .login-box button {{
+                width: 100%; padding: 12px; background: var(--naver-green); color: white;
+                border: none; border-radius: 10px; font-size: 16px; font-weight: 700; cursor: pointer;
+            }}
+            #main-content {{ display: none; flex-direction: column; flex: 1; padding: 20px; animation: fadeIn 0.8s ease; height: 100vh; min-height: 400px; overflow: hidden; }}
             
             .header-info {{ background: white; padding: 20px 30px; border-radius: 20px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); display: flex; justify-content: space-between; align-items: center; }}
             h1 {{ font-weight: 700; font-size: 1.5em; color: var(--primary); margin: 0; }}
@@ -337,6 +368,15 @@ def analyze():
         </style>
     </head>
     <body>
+        <div id="login-screen">
+            <div class="login-box">
+                <h2 style="margin-top:0;">🔒 보안 리포트</h2>
+                <p style="font-size: 14px; color: var(--text-muted); margin-bottom: 20px;">비밀번호를 입력해야 데이터를 확인할 수 있습니다.</p>
+                <input type="password" id="pwd" placeholder="비밀번호 입력" onkeypress="if(event.key === 'Enter') checkPwd()">
+                <button onclick="checkPwd()">암호 해독 및 열람</button>
+                <div id="error-msg" style="color: #e74c3c; font-size: 12px; margin-top: 15px; display: none;">비밀번호가 일치하지 않습니다.</div>
+            </div>
+        </div>
 
         <div id="main-content">
             <div class="header-info">
@@ -381,12 +421,43 @@ def analyze():
         </div>
 
         <script>
-            const rawData = {json_data_str};
-            let decryptedData = rawData; // 개인용 전환으로 직접 데이터 사용
+            const encryptedRawData = "{encrypted_data_str}";
+            let decryptedData = null;
 
-            window.onload = function() {{
-                initReport();
-            }};
+            function decrypt_data(b64, pwd) {{
+                try {{
+                    const binaryString = atob(b64);
+                    const bytes = new Uint8Array(binaryString.length);
+                    for (let i = 0; i < binaryString.length; i++) {{
+                        bytes[i] = binaryString.charCodeAt(i);
+                    }}
+                    
+                    const encoder = new TextEncoder();
+                    const pwdBytes = encoder.encode(pwd);
+                    
+                    for (let i = 0; i < bytes.length; i++) {{
+                        bytes[i] = bytes[i] ^ pwdBytes[i % pwdBytes.length];
+                    }}
+                    
+                    const decoder = new TextDecoder('utf-8');
+                    return JSON.parse(decoder.decode(bytes));
+                }} catch (e) {{
+                    return null;
+                }}
+            }}
+
+            function checkPwd() {{
+                const pwd = document.getElementById('pwd').value;
+                const data = decrypt_data(encryptedRawData, pwd);
+                if (data && data.active_users) {{
+                    decryptedData = data;
+                    document.getElementById('login-screen').style.display = 'none';
+                    document.getElementById('main-content').style.display = 'flex';
+                    initReport();
+                }} else {{
+                    document.getElementById('error-msg').style.display = 'block';
+                }}
+            }}
 
             function initReport() {{
                 document.getElementById('meta-info').innerText = `* 개인 리포트 | ${{decryptedData.generation_time}} | ${{Object.keys(decryptedData.active_users).length}}명`;
