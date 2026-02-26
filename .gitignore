@@ -1,0 +1,11 @@
+# 개인정보 보안을 위한 카카오톡 대화 로그 원본 제외
+*.txt
+KakaoTalk_*.txt
+
+# Python 캐시 파일 제외
+__pycache__/
+*.pyc
+
+# 기타 불필요 파일
+.DS_Store
+*.log
